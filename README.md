@@ -4,25 +4,58 @@
 
 ## 准备
 
-- 使用装有 Docker 和 Docker Compose v2 的 x86-64 Linux 主机。Docker 需要能向容器提供 `/dev/net/tun` 和 `NET_ADMIN`。
+- 使用装有 Docker 和 OpenSSL 的 x86-64 Linux 主机。Docker 需要能向容器提供 `/dev/net/tun` 和 `NET_ADMIN`。
 - 构建时需要访问 Docker Hub、Debian 软件源和 `www.expressvpn.works`。连接 VPN 需要有效的 ExpressVPN 账户。
 
-## 安装和启动
+## 发布和拉取镜像
 
-克隆仓库，进入项目目录，生成 SOCKS5 密码，再构建并启动网关。已有的密码文件会保留。
+在 GitHub 的 **Actions → Publish Docker image → Run workflow** 手动触发构建。工作流使用 `GITHUB_TOKEN` 将 `linux/amd64` 镜像发布到 GHCR。新建包默认为私有。拉取私有包前，运行 `docker login ghcr.io`，使用有包读取权限的 GitHub 用户名和带 `read:packages` 权限的 classic PAT 登录。公开包前请确认你有权分发镜像中的 ExpressVPN 官方客户端。
+
+```sh
+docker pull ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1
+```
+
+也可以克隆仓库，在项目目录自行构建。随后在同一个终端执行启动命令。
 
 ```sh
 git clone https://github.com/CodexSpaceLab-Projects/expressvpn-socks.git
 cd expressvpn-socks
+IMAGE=expressvpn-socks:14.3.1
+docker build --platform linux/amd64 --tag "$IMAGE" .
+```
+
+## 使用 `docker run` 启动
+
+在一个固定目录运行下面的命令。密码存放在该目录下的 `.secrets/socks-password`，已有文件会保留。两个容器共享自定义 Docker 网络。`expressvpn-socks` 运行 VPN 网关，`expressvpn-socks-ingress` 发布管理和 SOCKS5 端口，并通过该网络转发流量。
+
+```sh
+IMAGE=${IMAGE:-ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1}
+WEB_BIND=${WEB_BIND:-127.0.0.1}
+WEB_PORT=${WEB_PORT:-8080}
+SOCKS_BIND=${SOCKS_BIND:-0.0.0.0}
+SOCKS_PORT=${SOCKS_PORT:-1080}
+SOCKS_USER=${SOCKS_USER:-proxy}
+
 umask 077
 mkdir -p .secrets
 test -e .secrets/socks-password || openssl rand -hex 32 > .secrets/socks-password
-docker compose build expressvpn
-docker compose up -d --no-build --pull never
-docker compose ps
-```
+docker network inspect expressvpn-socks >/dev/null 2>&1 || docker network create expressvpn-socks
 
-如果手头已有可信的镜像归档 `dist/expressvpn-socks_14.3.1_linux-amd64.tar.gz`，生成密码后，可用 `docker image load -i dist/expressvpn-socks_14.3.1_linux-amd64.tar.gz` 代替构建，再执行启动命令。
+docker run -d --name expressvpn-socks --init --restart unless-stopped \
+  --network expressvpn-socks --network-alias expressvpn \
+  --cap-add NET_ADMIN --device /dev/net/tun:/dev/net/tun \
+  --env "SOCKS_USER=$SOCKS_USER" \
+  --env SOCKS_PASSWORD_FILE=/run/secrets/socks-password \
+  --env "SOCKS_PUBLISHED_PORT=$SOCKS_PORT" --env "SOCKS_DNS=${SOCKS_DNS:-}" \
+  --mount "type=bind,src=$PWD/.secrets/socks-password,dst=/run/secrets/socks-password,readonly" \
+  --mount type=volume,src=expressvpn-socks-settings,dst=/opt/expressvpn/etc \
+  --mount type=volume,src=expressvpn-socks-data,dst=/opt/expressvpn/var \
+  "$IMAGE" &&
+docker run -d --name expressvpn-socks-ingress --restart unless-stopped \
+  --network expressvpn-socks --user 65534:65534 --cap-drop ALL --read-only \
+  --publish "$WEB_BIND:$WEB_PORT:8080" --publish "$SOCKS_BIND:$SOCKS_PORT:1080" \
+  --entrypoint /usr/bin/python3 "$IMAGE" /app/relay.py expressvpn
+```
 
 ## 登录和连接
 
@@ -30,7 +63,7 @@ docker compose ps
 2. 在 **ExpressVPN 账户** 面板粘贴账户后台「设置设备 → Linux」中的激活码或登录令牌。支持邮箱密码的账户也可切换到 **邮箱密码**。邮箱验证码用于登录账户后台。 [查找激活码或登录令牌](https://www.expressvpn.com/support/manage-account/find-activation-code/)
 3. 按地区、国家或节点名称筛选，选择节点后点击 **连接**。切换时页面显示目标节点，等官方客户端确认实际连接后更新状态。等待期间可点击 **断开连接** 取消当前请求。
 
-ExpressVPN 登录会话存放在 Compose 的数据卷中。登录表单通过内存文件向官方 CLI 传递凭据，命令结束后删除该文件。
+ExpressVPN 登录会话存放在 Docker 数据卷中。登录表单通过内存文件向官方 CLI 传递凭据，命令结束后删除该文件。
 
 网关默认使用 Lightway TCP。VPN 连接后，点击 **检测代理出口** 可通过当前 SOCKS5 地址完成一次 HTTPS 检测，并查看出口 IP。
 
@@ -54,18 +87,17 @@ curl --fail --show-error --max-time 20 \
   https://www.cloudflare.com/cdn-cgi/trace
 ```
 
-Compose 默认将管理端口绑定到回环地址，将 SOCKS5 端口发布到所有 IPv4 接口。仅在本机使用代理时，在 `.env` 中设置 `SOCKS_BIND=127.0.0.1`。也可在 `.env` 中设置 `WEB_BIND`、`WEB_PORT`、`SOCKS_PORT` 或 `SOCKS_USER`。如果应用已连接且代理仍显示等待 VPN DNS，可用 `SOCKS_DNS` 指定隧道内可达的 DNS IP。
-
-Compose 的两个服务使用同一个镜像。`expressvpn` 运行官方客户端、管理页面和 SOCKS5 服务，`ingress` 只发布 TCP 端口，将请求转发给同一 Docker 网络内的 `expressvpn`。这种布局让局域网客户端的回包通过 Docker 网络返回。
+管理端口默认仅绑定到本机，SOCKS5 端口默认发布到所有 IPv4 接口。仅在本机使用代理时，启动前在终端设置 `SOCKS_BIND=127.0.0.1`。如果应用已连接且代理仍显示等待 VPN DNS，可在启动前用 `SOCKS_DNS` 指定隧道内可达的 DNS IP。
 
 ## 查看状态和停止
 
 ```sh
-docker compose ps
-docker compose logs --tail=100 expressvpn ingress
+docker ps -a --filter name=expressvpn-socks
+docker logs --tail=100 expressvpn-socks
+docker logs --tail=100 expressvpn-socks-ingress
 curl -fsS http://127.0.0.1:8080/healthz
 ```
 
 `/healthz` 返回 `ready` 表示 ExpressVPN 服务已就绪。VPN 是否已经连接以及连接到了哪个节点，可在管理页面查看。
 
-运行 `docker compose down` 停止服务。下次运行 `docker compose up -d --no-build --pull never` 时，Compose 会继续使用保存 ExpressVPN 登录会话的数据卷。
+运行 `docker stop expressvpn-socks-ingress expressvpn-socks` 停止服务。再次启动运行 `docker start expressvpn-socks expressvpn-socks-ingress`。更新镜像时，先停止并用 `docker rm expressvpn-socks-ingress expressvpn-socks` 移除旧容器，再拉取镜像并重新运行启动命令。保留数据卷即可继续使用已有的 ExpressVPN 登录会话。
