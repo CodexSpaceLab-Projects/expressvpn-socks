@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>ExpressVPN 网关</title>
+  <link rel="stylesheet" href="/app.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>ExpressVPN 网关</div>
+      <div class="chip" id="service-state"><i></i><span>服务启动中</span></div>
+    </div>
+  </header>
+
+  <main>
+    <h1>连接管理</h1>
+    <section class="connection" id="connection" aria-labelledby="connection-title">
+      <div class="connection-main">
+        <div class="signal" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="connection-label">VPN 隧道</p>
+          <h2 id="connection-title" aria-live="polite">正在检查</h2>
+          <p class="connection-location" id="connection-location">等待官方客户端启动</p>
+          <p class="connection-location" id="client-notice" role="status" hidden></p>
+        </div>
+      </div>
+      <div class="connection-meta">
+        <div><span>VPN IP</span><strong id="vpn-ip">—</strong></div>
+        <button class="button inverted" type="button" id="disconnect" disabled>断开连接</button>
+      </div>
+    </section>
+    <p class="notice" id="notice" aria-live="polite" hidden></p>
+    <p class="notice" id="operation-error" role="alert" hidden></p>
+
+    <div class="dashboard">
+      <section class="panel locations" aria-labelledby="locations-title">
+        <div class="panel-heading">
+          <div><h2 id="locations-title">VPN 节点</h2><p id="location-count">等待加载节点</p></div>
+          <button class="button secondary small" id="reload" type="button" disabled>刷新</button>
+        </div>
+        <div class="filters">
+          <label>地区<select id="area" disabled><option value="">全部地区</option></select></label>
+          <label>国家或地区<select id="country" disabled><option value="">全部国家或地区</option></select></label>
+          <label>搜索节点<input type="search" id="search" placeholder="城市或节点名称" disabled></label>
+        </div>
+        <div class="node-list" id="nodes" aria-label="可用节点"><p class="empty">登录后会加载可用节点。</p></div>
+        <div class="panel-footer">
+          <p id="selection">智能位置</p>
+          <button class="button primary" type="button" id="connect" disabled>连接</button>
+        </div>
+      </section>
+
+      <div class="side">
+        <section class="panel account" aria-labelledby="account-title">
+          <div class="panel-heading">
+            <h2 id="account-title">ExpressVPN 账户</h2>
+            <span class="chip" id="account-state"><i></i><span>待登录</span></span>
+          </div>
+          <form id="login">
+            <div class="login-method" role="group" aria-label="登录方式">
+              <button class="tab" type="button" data-method="code" aria-pressed="true">激活码或令牌</button>
+              <button class="tab" type="button" data-method="email" aria-pressed="false">邮箱密码</button>
+            </div>
+            <div id="code-fields" class="fields">
+              <label>Linux 激活码或登录令牌<input name="code" type="password" autocomplete="off" spellcheck="false" required></label>
+              <p class="proxy-detail">从账户后台的「设置设备 → Linux」复制设备凭据。邮箱验证码用于登录账户后台。</p>
+            </div>
+            <div id="email-fields" class="fields" hidden>
+              <label>ExpressVPN 账户邮箱<input name="email" type="email" autocomplete="username" placeholder="name@example.com" disabled required></label>
+              <label>ExpressVPN 账户密码<input name="password" type="password" autocomplete="current-password" disabled required></label>
+            </div>
+            <a class="account-help" href="https://www.expressvpn.com/support/manage-account/find-activation-code/" target="_blank" rel="noreferrer">在官方账户后台查找设备凭据 ↗</a>
+            <button type="submit" class="button primary login-button" id="login-button" disabled>登录 ExpressVPN</button>
+            <p class="notice" id="login-message" role="status" hidden></p>
+          </form>
+          <div class="account-active" id="account-active" hidden>
+            <button class="button secondary" type="button" id="logout">退出登录</button>
+          </div>
+        </section>
+
+        <section class="panel proxy" aria-labelledby="proxy-title">
+          <div class="panel-heading">
+            <h2 id="proxy-title">SOCKS5 代理</h2>
+            <span class="chip" id="proxy-state"><i></i><span>等待 VPN</span></span>
+          </div>
+          <div class="endpoint"><code id="endpoint">socks5h://…:1080</code><button class="button secondary small" id="copy" type="button">复制</button></div>
+          <p class="proxy-detail">代理用户名 <strong id="proxy-user">proxy</strong></p>
+          <p class="proxy-detail" id="dns-state">域名由代理端解析。</p>
+          <button class="button secondary small proxy-check" id="test-proxy" type="button" disabled>检测代理出口</button>
+          <p class="notice" id="proxy-message" role="status" hidden></p>
+        </section>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

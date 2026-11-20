@@ -1,0 +1,41 @@
+services:
+  expressvpn:
+    image: expressvpn-socks:14.3.1
+    build: .
+    init: true
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      SOCKS_USER: ${SOCKS_USER:-proxy}
+      SOCKS_PASSWORD_FILE: /run/secrets/socks-password
+      SOCKS_PUBLISHED_PORT: ${SOCKS_PORT:-1080}
+      SOCKS_DNS: ${SOCKS_DNS:-}
+    secrets:
+      - socks-password
+    volumes:
+      - expressvpn-settings:/opt/expressvpn/etc
+      - expressvpn-data:/opt/expressvpn/var
+
+  ingress:
+    image: expressvpn-socks:14.3.1
+    entrypoint: ["/usr/bin/python3", "/app/relay.py", "expressvpn"]
+    depends_on:
+      - expressvpn
+    restart: unless-stopped
+    user: "65534:65534"
+    cap_drop: [ALL]
+    read_only: true
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+      - "${SOCKS_BIND:-0.0.0.0}:${SOCKS_PORT:-1080}:1080"
+
+secrets:
+  socks-password:
+    file: ./.secrets/socks-password
+
+volumes:
+  expressvpn-settings:
+  expressvpn-data:

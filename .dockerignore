@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!app/
+!app/**
+!docker/
+!docker/install-expressvpn.sh
+**/__pycache__/
