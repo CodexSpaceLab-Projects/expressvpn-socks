@@ -4,15 +4,22 @@ import json
 import logging
 import os
 import signal
-from contextlib import suppress
+import socket
+from contextlib import ExitStack, suppress
 from pathlib import Path
 
 from aiohttp import web
 
 from proxy import SocksProxy, usable_address
-from vpn import CLI_ENV, DAEMON, CLIError, ExpressVPN, LoginError
+from vpn import CLI_ENV, DAEMON, CLIError, ExpressVPN, LoginError, run
 
 STATIC = Path(__file__).parent / "static"
+WEB_PORT = 8080
+SOCKS_PORT = 1080
+# ExpressVPN 14.3.1 accepts this packet mark through Network Lock. Only the
+# listening sockets use it. SOCKS destination sockets still bind to the tunnel.
+INGRESS_MARK = 0x3213
+INGRESS_ROUTE_TABLE = "108"
 ACTIONS = {"login", "logout", "connect", "disconnect", "refresh", "test-proxy"}
 LOGIN_MESSAGES = {
     "account_portal": "该账户需要网页验证。请在 ExpressVPN 账户后台完成验证，然后复制 Linux 的激活码或登录令牌。",
@@ -166,23 +173,52 @@ def check_network():
         raise ValueError("容器需要 NET_ADMIN 权限")
 
 
-async def main():
-    try:
-        check_network()
-        socks_user, socks_pass = proxy_credentials()
-        socks_port = int(os.getenv("SOCKS_PUBLISHED_PORT", "1080"))
-        if not 1 <= socks_port <= 65535:
-            raise ValueError("SOCKS_PUBLISHED_PORT 超出端口范围")
-        resolvers = tuple(ipaddress.ip_address(value) for value in os.getenv("SOCKS_DNS", "").replace(",", " ").split())
-        if len(resolvers) > 3 or not all(usable_address(address) for address in resolvers):
-            raise ValueError("SOCKS_DNS 必须为最多三个可通过隧道访问的 DNS 地址")
-    except (ValueError, OSError) as error:
-        logging.error("启动失败。%s", error)
-        return 1
+async def configure_ingress_routes():
+    # Save Docker's routes before the VPN adds its routing rules.
+    routes = await run("ip", "-4", "-o", "route", "show", "table", "main")
+    for route in routes.splitlines():
+        await run("ip", "-4", "route", "replace", "table", INGRESS_ROUTE_TABLE, *route.split())
+    for port in (WEB_PORT, SOCKS_PORT):
+        rule = ("priority", "40", "iif", "lo", "fwmark", hex(INGRESS_MARK), "ipproto", "tcp",
+                "sport", str(port), "lookup", INGRESS_ROUTE_TABLE)
+        with suppress(CLIError):
+            await run("ip", "-4", "rule", "del", *rule)
+        await run("ip", "-4", "rule", "add", *rule)
 
-    proxy = SocksProxy(socks_user, socks_pass)
-    vpn = ExpressVPN(proxy, resolvers, os.getenv("EXPRESSVPN_PROTOCOL", "lightwaytcp"))
-    app = control_app(vpn, socks_user.decode(), socks_port)
+
+def bind_listener(listener, port):
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_MARK, INGRESS_MARK)
+    listener.bind(("0.0.0.0", port))
+
+
+async def main():
+    with ExitStack() as listeners:
+        try:
+            check_network()
+            socks_user, socks_pass = proxy_credentials()
+            socks_port = int(os.getenv("SOCKS_PUBLISHED_PORT", str(SOCKS_PORT)))
+            if not 1 <= socks_port <= 65535:
+                raise ValueError("SOCKS_PUBLISHED_PORT 超出端口范围")
+            resolvers = tuple(ipaddress.ip_address(value) for value in os.getenv("SOCKS_DNS", "").replace(",", " ").split())
+            if len(resolvers) > 3 or not all(usable_address(address) for address in resolvers):
+                raise ValueError("SOCKS_DNS 必须为最多三个可通过隧道访问的 DNS 地址")
+            await configure_ingress_routes()
+            web_listener = listeners.enter_context(socket.socket())
+            socks_listener = listeners.enter_context(socket.socket())
+            bind_listener(web_listener, WEB_PORT)
+            bind_listener(socks_listener, SOCKS_PORT)
+        except (CLIError, ValueError, OSError) as error:
+            logging.error("启动失败。%s", error)
+            return 1
+
+        proxy = SocksProxy(socks_user, socks_pass)
+        vpn = ExpressVPN(proxy, resolvers, os.getenv("EXPRESSVPN_PROTOCOL", "lightwaytcp"))
+        app = control_app(vpn, socks_user.decode(), socks_port)
+        return await serve(app, vpn, web_listener, socks_listener)
+
+
+async def serve(app, vpn, web_listener, socks_listener):
     runner = web.AppRunner(app, access_log=None, shutdown_timeout=3)
     daemon = await asyncio.create_subprocess_exec(
         DAEMON, env=CLI_ENV, stdin=asyncio.subprocess.DEVNULL,
@@ -195,17 +231,17 @@ async def main():
     tasks = {asyncio.create_task(vpn.watch()), asyncio.create_task(daemon.wait()), asyncio.create_task(stop.wait())}
     try:
         await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", 8080).start()
-        server = await asyncio.start_server(proxy.handle, "0.0.0.0", 1080)
+        await web.SockSite(runner, web_listener).start()
+        server = await asyncio.start_server(vpn.proxy.handle, sock=socks_listener)
         async with server:
-            logging.info("管理界面监听 8080，SOCKS5 监听 1080")
+            logging.info("管理界面监听 %d，SOCKS5 监听 %d", WEB_PORT, SOCKS_PORT)
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         if not stop.is_set():
             logging.error("ExpressVPN 服务意外停止")
             return 1
         return 0
     finally:
-        proxy.set_tunnel(None)
+        vpn.proxy.set_tunnel(None)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
