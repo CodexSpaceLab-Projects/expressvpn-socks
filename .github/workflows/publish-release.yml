@@ -1,0 +1,65 @@
+name: Publish Docker release archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: GHCR image digest to publish
+        required: true
+        type: string
+      source_commit:
+        description: Source commit used to build the image
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: '14.3.1'
+      IMAGE_REPOSITORY: ghcr.io/codexspacelab-projects/expressvpn-socks
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+
+    steps:
+      - name: Export the published image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+          published_image="$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+          tagged_image="$IMAGE_REPOSITORY:$VERSION"
+          docker pull --platform linux/amd64 "$published_image"
+          docker tag "$published_image" "$tagged_image"
+          archive="expressvpn-socks_${VERSION}_linux-amd64.tar.gz"
+          docker save "$tagged_image" | gzip -1 > "$archive"
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive="expressvpn-socks_${VERSION}_linux-amd64.tar.gz"
+          gh release create "v$VERSION" "$archive" "$archive.sha256" \
+            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_COMMIT" \
+            --title "ExpressVPN SOCKS5 Gateway $VERSION" --notes-file - <<EOF
+          Linux x86-64 Docker image for ExpressVPN SOCKS5 Gateway.
+
+          Verify and load the downloaded image:
+
+              sha256sum -c $archive.sha256
+              docker image load -i $archive
+
+          Loaded tag: $IMAGE_REPOSITORY:$VERSION
+          GHCR digest: $IMAGE_DIGEST
+
+          Deployment: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/main#readme
+          EOF
