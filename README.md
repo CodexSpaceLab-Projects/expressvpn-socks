@@ -9,20 +9,20 @@
 
 ## 下载镜像
 
-从 [GitHub Releases](https://github.com/CodexSpaceLab-Projects/expressvpn-socks/releases/tag/v14.3.1) 下载 `expressvpn-socks_14.3.1_linux-amd64.tar.gz` 和同名 `.sha256` 文件。在下载目录校验并加载镜像，即可执行下文的 `docker run` 命令。
+每次向 `main` 推送更新时，GitHub Actions 都会构建 `linux/amd64` 镜像并发布到公开的 GHCR。`latest` 和 `14.3.1` 指向 `main` 的最新成功构建。使用 `sha-<完整提交 SHA>` 可拉取指定提交的镜像。拉取无需登录。
+
+```sh
+docker pull ghcr.io/codexspacelab-projects/expressvpn-socks:latest
+```
+
+也可在 GitHub 的 **Actions → Publish Docker image → Run workflow** 手动发布 `main` 的镜像。
+
+离线安装时，从 Releases 下载 `expressvpn-socks_14.3.1_linux-amd64.tar.gz` 和同名 `.sha256` 文件。在下载目录校验并加载镜像，再用 `IMAGE=ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1` 运行下文的启动命令。 [GitHub Releases](https://github.com/CodexSpaceLab-Projects/expressvpn-socks/releases/tag/v14.3.1)
 
 ```sh
 sha256sum -c expressvpn-socks_14.3.1_linux-amd64.tar.gz.sha256 &&
 docker image load -i expressvpn-socks_14.3.1_linux-amd64.tar.gz
 ```
-
-有 GHCR 包读取权限的用户也可以直接拉取。在 `docker login ghcr.io` 中使用 GitHub 用户名和带 `read:packages` 权限的 classic PAT 登录。
-
-```sh
-docker pull ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1
-```
-
-在 GitHub 的 **Actions → Publish Docker image → Run workflow** 可以手动构建并推送 `linux/amd64` 镜像到 GHCR。
 
 也可以克隆仓库，在项目目录自行构建。随后在同一个终端执行启动命令。
 
@@ -38,7 +38,7 @@ docker build --platform linux/amd64 --tag "$IMAGE" .
 在一个固定目录运行下面的命令。密码存放在该目录下的 `.secrets/socks-password`，已有文件会保留。两个容器共享自定义 Docker 网络。`expressvpn-socks` 运行 VPN 网关，`expressvpn-socks-ingress` 发布管理和 SOCKS5 端口，并通过该网络转发流量。
 
 ```sh
-IMAGE=${IMAGE:-ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1}
+IMAGE=${IMAGE:-ghcr.io/codexspacelab-projects/expressvpn-socks:latest}
 WEB_BIND=${WEB_BIND:-127.0.0.1}
 WEB_PORT=${WEB_PORT:-8080}
 SOCKS_BIND=${SOCKS_BIND:-0.0.0.0}
