@@ -7,13 +7,22 @@
 - 使用装有 Docker 和 OpenSSL 的 x86-64 Linux 主机。Docker 需要能向容器提供 `/dev/net/tun` 和 `NET_ADMIN`。
 - 构建时需要访问 Docker Hub、Debian 软件源和 `www.expressvpn.works`。连接 VPN 需要有效的 ExpressVPN 账户。
 
-## 发布和拉取镜像
+## 下载镜像
 
-在 GitHub 的 **Actions → Publish Docker image → Run workflow** 手动触发构建。工作流使用 `GITHUB_TOKEN` 将 `linux/amd64` 镜像发布到 GHCR。新建包默认为私有。拉取私有包前，运行 `docker login ghcr.io`，使用有包读取权限的 GitHub 用户名和带 `read:packages` 权限的 classic PAT 登录。公开包前请确认你有权分发镜像中的 ExpressVPN 官方客户端。
+从 [GitHub Releases](https://github.com/CodexSpaceLab-Projects/expressvpn-socks/releases/tag/v14.3.1) 下载 `expressvpn-socks_14.3.1_linux-amd64.tar.gz` 和同名 `.sha256` 文件。在下载目录校验并加载镜像，即可执行下文的 `docker run` 命令。
+
+```sh
+sha256sum -c expressvpn-socks_14.3.1_linux-amd64.tar.gz.sha256 &&
+docker image load -i expressvpn-socks_14.3.1_linux-amd64.tar.gz
+```
+
+有 GHCR 包读取权限的用户也可以直接拉取。在 `docker login ghcr.io` 中使用 GitHub 用户名和带 `read:packages` 权限的 classic PAT 登录。
 
 ```sh
 docker pull ghcr.io/codexspacelab-projects/expressvpn-socks:14.3.1
 ```
+
+在 GitHub 的 **Actions → Publish Docker image → Run workflow** 可以手动构建并推送 `linux/amd64` 镜像到 GHCR。
 
 也可以克隆仓库，在项目目录自行构建。随后在同一个终端执行启动命令。
 
@@ -100,4 +109,4 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 `/healthz` 返回 `ready` 表示 ExpressVPN 服务已就绪。VPN 是否已经连接以及连接到了哪个节点，可在管理页面查看。
 
-运行 `docker stop expressvpn-socks-ingress expressvpn-socks` 停止服务。再次启动运行 `docker start expressvpn-socks expressvpn-socks-ingress`。更新镜像时，先停止并用 `docker rm expressvpn-socks-ingress expressvpn-socks` 移除旧容器，再拉取镜像并重新运行启动命令。保留数据卷即可继续使用已有的 ExpressVPN 登录会话。
+运行 `docker stop expressvpn-socks-ingress expressvpn-socks` 停止服务。再次启动运行 `docker start expressvpn-socks expressvpn-socks-ingress`。更新镜像时，先停止并用 `docker rm expressvpn-socks-ingress expressvpn-socks` 移除旧容器，再加载新归档或拉取新镜像，并重新运行启动命令。保留数据卷即可继续使用已有的 ExpressVPN 登录会话。
